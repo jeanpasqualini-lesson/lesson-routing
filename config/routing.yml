@@ -1,0 +1,8 @@
+foo:
+    path: /foo
+    defaults: { _controller: "MyController:fooAction" }
+autre:
+    path: /archive/{month}
+    requirements:
+        month: "[0-9]{4}-[0-9]{2}"
+    defaults: {}
