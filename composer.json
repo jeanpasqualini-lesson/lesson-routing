@@ -1,0 +1,25 @@
+{
+    "name": "jean-pasqualini-lesson/lesson-routing",
+    "description": "lesson routing",
+    "type": "project",
+    "require": {
+        "symfony/routing": "3.0.*",
+        "symfony/config": "3.0.*",
+        "symfony/yaml": "3.0.*",
+	"symfony/filesystem": "3.0.*"
+    },
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Jean Pasqualini",
+            "email": "jpasqualini75@gmail.com"
+        }
+    ],
+  "autoload" :
+  {
+     "psr-4" :
+     {
+        "" : "src/"
+     }
+  }
+}
