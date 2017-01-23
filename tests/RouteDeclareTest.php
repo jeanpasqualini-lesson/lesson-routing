@@ -6,12 +6,17 @@ use Doctrine\Common\Annotations\AnnotationReader;
 use Doctrine\Common\Annotations\AnnotationRegistry;
 use Sensio\Bundle\FrameworkExtraBundle\Routing\AnnotatedRouteControllerLoader;
 use Symfony\Component\Config\FileLocator;
+use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\Routing\Exception\ResourceNotFoundException;
 use Symfony\Component\Routing\Loader\ClosureLoader;
 use Symfony\Component\Routing\Loader\XmlFileLoader;
 use Symfony\Component\Routing\Loader\YamlFileLoader;
 use Symfony\Component\Routing\Matcher\Dumper\PhpMatcherDumper;
+use Symfony\Component\Routing\Matcher\UrlMatcher;
+use Symfony\Component\Routing\RequestContext;
 use Symfony\Component\Routing\Route;
 use Symfony\Component\Routing\RouteCollection;
+use Symfony\Component\Routing\Router;
 
 /**
  * RouteDeclareTest
@@ -27,6 +32,8 @@ class RouteDeclareTest extends \PHPUnit_Framework_TestCase
     protected $routeCollection;
     protected $routerMatcherDumped;
     protected $routerGeneratorDumped;
+    /** @var UrlMatcher */
+    protected $routerMatcher;
 
     protected $current = array();
 
@@ -146,6 +153,7 @@ class RouteDeclareTest extends \PHPUnit_Framework_TestCase
         }
 
         $this->routeCollection = $routeCollection;
+        $this->routerMatcher = new UrlMatcher($routeCollection, new RequestContext());
     }
 
     public function testSimpleRoute()
@@ -276,5 +284,80 @@ class RouteDeclareTest extends \PHPUnit_Framework_TestCase
         $this->load();
 
         $this->assertEquals(array('fixture_autonamed_main'), array_keys($this->routeCollection->all()));
+    }
+
+    public function assertException($exceptionClass, $callback)
+    {
+        try {
+            $callback();
+        } catch(\Exception $e) {
+            $this->assertEquals($exceptionClass, get_class($e), 'asserting exception');
+            return;
+        }
+
+        $this->assertEquals($exceptionClass, '---------', 'asserting exception');
+    }
+
+    public function testCondition()
+    {
+        ?>
+        route_condition:
+            path: /route-condition
+            condition: request.isMethod('POST')
+        <?php
+        $this->registerYaml();
+
+        $this->load();
+
+        $this->assertException(ResourceNotFoundException::class, function() {
+            $this->routerMatcher->matchRequest(Request::create($path='/route-condition', $method='GET'));
+        });
+
+        $this->assertTrue((bool) $this->routerMatcher->matchRequest(Request::create($path='/route-condition', $method='POST')));
+    }
+
+    public function testRequirements()
+    {
+        ?>
+        route_requirements:
+            path: /route-requirements/{int}
+            requirements:
+                int: '\d+'
+        <?php
+        $this->registerYaml();
+
+        $this->assertException(ResourceNotFoundException::class, function() {
+            $this->routerMatcher->matchRequest(Request::create($path='/route-requirements'));
+        });
+
+        $this->assertTrue((bool) $this->routerMatcher->matchRequest(Request::create($path='/route-requirements')));
+
+        $this->load();
+    }
+
+
+
+    public function testMethod()
+    {
+        ?>
+        route_method:
+        path: /route-method
+        methods: PUT|POST
+        <?php
+        $this->registerYaml();
+
+        $this->load();
+    }
+
+    public function testDefaults()
+    {
+        ?>
+        route_defaults:
+        path: /route-defaults
+        defaults: { color: red }
+        <?php
+        $this->registerYaml();
+
+        $this->load();
     }
 }
