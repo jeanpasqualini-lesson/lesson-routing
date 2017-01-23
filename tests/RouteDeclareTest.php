@@ -2,21 +2,10 @@
 
 namespace tests;
 
-use Doctrine\Common\Annotations\AnnotationReader;
-use Doctrine\Common\Annotations\AnnotationRegistry;
-use Sensio\Bundle\FrameworkExtraBundle\Routing\AnnotatedRouteControllerLoader;
-use Symfony\Component\Config\FileLocator;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Exception\ResourceNotFoundException;
-use Symfony\Component\Routing\Loader\ClosureLoader;
-use Symfony\Component\Routing\Loader\XmlFileLoader;
-use Symfony\Component\Routing\Loader\YamlFileLoader;
-use Symfony\Component\Routing\Matcher\Dumper\PhpMatcherDumper;
-use Symfony\Component\Routing\Matcher\UrlMatcher;
-use Symfony\Component\Routing\RequestContext;
 use Symfony\Component\Routing\Route;
 use Symfony\Component\Routing\RouteCollection;
-use Symfony\Component\Routing\Router;
 
 /**
  * RouteDeclareTest
@@ -26,135 +15,9 @@ use Symfony\Component\Routing\Router;
  */
 class RouteDeclareTest extends \PHPUnit_Framework_TestCase
 {
+    use RoutingLoaderTrait;
+
     // 'resource', 'type', 'prefix', 'path', 'host', 'schemes', 'methods', 'defaults', 'requirements', 'options', 'condition'
-
-    /** @var RouteCollection */
-    protected $routeCollection;
-    protected $routerMatcherDumped;
-    protected $routerGeneratorDumped;
-    /** @var UrlMatcher */
-    protected $routerMatcher;
-
-    protected $current = array();
-
-    public function setUp()
-    {
-        $this->current = array();
-        $this->routeCollection = null;
-        ob_start();
-    }
-
-    public function getContentOb()
-    {
-        $content = ob_get_clean();
-        $content = implode(
-            PHP_EOL,
-            array_filter(
-                array_map(
-                    function($item) { return substr($item, 8); },
-                    explode(PHP_EOL, $content)
-                ),
-                function($item) { return !empty($item); }
-            )
-        );
-        return $content;
-    }
-
-    public function registerYaml()
-    {
-        $this->current['yaml'] = $this->getContentOb();
-        ob_start();
-    }
-
-    public function registerXml()
-    {
-        $this->current['xml'] = '<?xml version="1.0" encoding="UTF-8"?>'.PHP_EOL.$this->getContentOb();
-        ob_start();
-    }
-
-    public function registerAnnotation($class)
-    {
-        file_put_contents(sys_get_temp_dir().'/controller.php', '<?php'.PHP_EOL.$this->getContentOb());
-        require sys_get_temp_dir().'/controller.php';
-
-        $this->current['annotation'] = $class;
-        ob_start();
-    }
-
-    public function registerClosure($closure)
-    {
-        $this->current['closure'] = function() use ($closure) {
-
-            $routeCollection = new RouteCollection();
-            $closure($routeCollection);
-
-            return $routeCollection;
-        };
-    }
-
-    /**
-     * @param array $configs
-     */
-    public function load()
-    {
-        ob_end_clean();
-
-        $configs = $this->current;
-
-        $previousRouteCollection = null;
-
-        $previousLoader = null;
-        $previousRouterMatcherDumped = null;
-        $routerMatcherDumped = null;
-        $routeCollection = null;
-
-        foreach ($configs as $type => $config) {
-            switch ($type)
-            {
-                case 'yaml':
-                    file_put_contents(sys_get_temp_dir().'/routes.yml', $config);
-                    $loader = new YamlFileLoader(new FileLocator(sys_get_temp_dir()));
-                    $routeCollection = $loader->load('routes.yml');
-                    $routerMatcherDumper = new PhpMatcherDumper($routeCollection);
-                    $routerMatcherDumped = $routerMatcherDumper->dump();
-                    break;
-                case 'xml':
-                    file_put_contents(sys_get_temp_dir().'/routes.xml', $config);
-                    $loader = new XmlFileLoader(new FileLocator(sys_get_temp_dir()));
-                    $routeCollection = $loader->load('routes.xml');
-                    $routerMatcherDumper = new PhpMatcherDumper($routeCollection);
-                    $routerMatcherDumped = $routerMatcherDumper->dump();
-                    break;
-                case 'closure':
-                    $loader = new ClosureLoader();
-                    $routeCollection = $loader->load($config);
-                    $routerMatcherDumper = new PhpMatcherDumper($routeCollection);
-                    $routerMatcherDumped = $routerMatcherDumper->dump();
-                    break;
-                case 'annotation':
-                    $loader = new AnnotatedRouteControllerLoader(new AnnotationReader());
-                    $routeCollection = $loader->load($config);
-                    $routerMatcherDumper = new PhpMatcherDumper($routeCollection);
-                    $routerMatcherDumped = $routerMatcherDumper->dump();
-                    break;
-
-            }
-
-            if ($previousRouterMatcherDumped !== null && $routerMatcherDumped !== null) {
-                $this->assertEquals(
-                    $previousRouterMatcherDumped,
-                    $routerMatcherDumped,
-                    $previousLoader. ' vs '.$type
-                );
-            }
-
-            $previousLoader = $type;
-            $previousRouterMatcherDumped = $routerMatcherDumped;
-        }
-
-        $this->routeCollection = $routeCollection;
-        $this->routerMatcher = new UrlMatcher($routeCollection, new RequestContext());
-    }
 
     public function testSimpleRoute()
     {
@@ -286,26 +149,44 @@ class RouteDeclareTest extends \PHPUnit_Framework_TestCase
         $this->assertEquals(array('fixture_autonamed_main'), array_keys($this->routeCollection->all()));
     }
 
-    public function assertException($exceptionClass, $callback)
-    {
-        try {
-            $callback();
-        } catch(\Exception $e) {
-            $this->assertEquals($exceptionClass, get_class($e), 'asserting exception');
-            return;
-        }
-
-        $this->assertEquals($exceptionClass, '---------', 'asserting exception');
-    }
-
     public function testCondition()
     {
         ?>
         route_condition:
             path: /route-condition
             condition: request.isMethod('POST')
+            defaults: { _controller: 'Fixture\Condition\Controller::mainAction' }
         <?php
         $this->registerYaml();
+
+        ?>
+        <routes xmlns="http://symfony.com/schema/routing"
+                xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                xsi:schemaLocation="http://symfony.com/schema/routing
+                http://symfony.com/schema/routing/routing-1.0.xsd">
+            <route id="route_condition" path="/route-condition">
+                <condition>request.isMethod('POST')</condition>
+                <default key="_controller">Fixture\Condition\Controller::mainAction</default>
+            </route>
+        </routes>
+        <?php
+        $this->registerXml();
+
+        $this->registerClosure(function(RouteCollection $routeCollection)
+        {
+            $routeCollection->add('route_condition', new Route(
+                $path = '/route-condition',
+                $defaults = array(
+                    '_controller' => 'Fixture\\Condition\\Controller::mainAction'
+                ),
+                $requirements = array(),
+                $options = array(),
+                $host = '',
+                $schemes = array(),
+                $methods = array(),
+                $condition = "request.isMethod('POST')"
+            ));
+        });
 
         $this->load();
 
@@ -320,19 +201,68 @@ class RouteDeclareTest extends \PHPUnit_Framework_TestCase
     {
         ?>
         route_requirements:
-            path: /route-requirements/{int}
+            path: /route-requirements/{integer}
+            defaults:
+                _controller: Fixture\Requirements\Controller::mainAction
             requirements:
-                int: '\d+'
+                integer: '\d+'
         <?php
         $this->registerYaml();
 
-        $this->assertException(ResourceNotFoundException::class, function() {
-            $this->routerMatcher->matchRequest(Request::create($path='/route-requirements'));
+        ?>
+        <routes xmlns="http://symfony.com/schema/routing"
+                xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                xsi:schemaLocation="http://symfony.com/schema/routing
+                http://symfony.com/schema/routing/routing-1.0.xsd">
+            <route id="route_requirements" path="/route-requirements/{integer}">
+                <default key="_controller">Fixture\Requirements\Controller::mainAction</default>
+                <requirement key="integer">\d+</requirement>
+            </route>
+        </routes>
+        <?php
+        $this->registerXml();
+
+        $this->registerClosure(function(RouteCollection $routeCollection)
+        {
+            $routeCollection->add('route_requirements', new Route(
+                    $path = '/route-requirements/{integer}',
+                    $defaults = array(
+                        '_controller' => 'Fixture\Requirements\Controller::mainAction'
+                    ),
+                    $requirements = array(
+                        'integer' => '\d+'
+                    ),
+                    $options = array(),
+                    $host = '',
+                    $scheme = array(),
+                    $methods = array(),
+                    $condition = ''
+            ));
         });
 
-        $this->assertTrue((bool) $this->routerMatcher->matchRequest(Request::create($path='/route-requirements')));
+        ?>
+        namespace Fixture\Requirements {
+
+            use Sensio\Bundle\FrameworkExtraBundle\Configuration\Route;
+
+            class Controller {
+                /**
+                * @Route("/route-requirements/{integer}", name="route_requirements", requirements={"integer":"\d+"})
+                */
+                public function mainAction() {}
+            }
+        }
+        <?php
+
+        $this->registerAnnotation('Fixture\Requirements\Controller');
 
         $this->load();
+
+        $this->assertException(ResourceNotFoundException::class, function() {
+            $this->routerMatcher->matchRequest(Request::create($path='/route-requirements/A'));
+        });
+
+        $this->assertTrue((bool) $this->routerMatcher->matchRequest(Request::create($path='/route-requirements/5')));
     }
 
 
@@ -341,10 +271,58 @@ class RouteDeclareTest extends \PHPUnit_Framework_TestCase
     {
         ?>
         route_method:
-        path: /route-method
-        methods: PUT|POST
+            path: /route-method
+            defaults:
+                _controller: Fixture\Method\Controller::mainAction
+            methods: [PUT, POST]
         <?php
         $this->registerYaml();
+
+        ?>
+        <routes xmlns="http://symfony.com/schema/routing"
+                xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                xsi:schemaLocation="http://symfony.com/schema/routing
+                http://symfony.com/schema/routing/routing-1.0.xsd">
+            <route id="route_method" path="/route-method" methods="PUT|POST">
+                <default key="_controller">Fixture\Method\Controller::mainAction</default>
+            </route>
+        </routes>
+        <?php
+        $this->registerXml();
+
+        $this->registerClosure(function(RouteCollection $routeCollection)
+        {
+            $routeCollection->add('route_method', new Route(
+                $path = '/route-method',
+                $defaults = array(
+                    '_controller' => 'Fixture\Method\Controller::mainAction'
+                ),
+                $requirements = array(),
+                $options = array(),
+                $host = '',
+                $scheme = array(),
+                $methods = array('PUT', 'POST'),
+                $condition = ''
+            ));
+        });
+
+        ?>
+        namespace Fixture\Method {
+
+            use Sensio\Bundle\FrameworkExtraBundle\Configuration\Route;
+            use Sensio\Bundle\FrameworkExtraBundle\Configuration\Method;
+
+            class Controller {
+                /**
+                * @Route("/route-method", name="route_method")
+                * @Method({"POST","PUT"})
+                */
+                public function mainAction() {}
+            }
+        }
+        <?php
+
+        //$this->registerAnnotation('Fixture\Method\Controller');
 
         $this->load();
     }
@@ -353,11 +331,234 @@ class RouteDeclareTest extends \PHPUnit_Framework_TestCase
     {
         ?>
         route_defaults:
-        path: /route-defaults
-        defaults: { color: red }
+            path: /route-defaults
+            defaults: { color: red, _controller: Fixture\Defaults\Controller::mainAction }
         <?php
         $this->registerYaml();
 
+        ?>
+        <routes xmlns="http://symfony.com/schema/routing"
+                xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                xsi:schemaLocation="http://symfony.com/schema/routing
+                http://symfony.com/schema/routing/routing-1.0.xsd">
+            <route id="route_defaults" path="/route-defaults">
+                <default key="color">red</default>
+                <default key="_controller">Fixture\Defaults\Controller::mainAction</default>
+            </route>
+        </routes>
+        <?php
+        $this->registerXml();
+
+        $this->registerClosure(function(RouteCollection $routeCollection)
+        {
+            $routeCollection->add('route_defaults', new Route(
+                $path = '/route-defaults',
+                $defaults = array(
+                    'color' => 'red',
+                    '_controller' => 'Fixture\Defaults\Controller::mainAction',
+                ),
+                $requirements = array(),
+                $options = array(),
+                $host = '',
+                $scheme = array(),
+                $methods = array(),
+                $condition = ''
+            ));
+        });
+
+        ?>
+        namespace Fixture\Defaults {
+
+            use Sensio\Bundle\FrameworkExtraBundle\Configuration\Route;
+            use Sensio\Bundle\FrameworkExtraBundle\Configuration\Method;
+
+            class Controller {
+                /**
+                * @Route("/route-defaults", name="route_defaults", defaults={"color" : "red"})
+                */
+                public function mainAction() {}
+            }
+        }
+        <?php
+
+        $this->registerAnnotation('Fixture\Defaults\Controller');
+
         $this->load();
     }
+
+    public function testOptions()
+    {
+        ?>
+        route_options:
+            path: /route-options
+            defaults: { _controller: Fixture\Options\Controller::mainAction }
+            options: { }
+        <?php
+        $this->registerYaml();
+
+        ?>
+        <routes xmlns="http://symfony.com/schema/routing"
+                xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                xsi:schemaLocation="http://symfony.com/schema/routing
+                http://symfony.com/schema/routing/routing-1.0.xsd">
+            <route id="route_options" path="/route-options">
+                <default key="_controller">Fixture\Options\Controller::mainAction</default>
+            </route>
+        </routes>
+        <?php
+        $this->registerXml();
+
+        $this->registerClosure(function(RouteCollection $routeCollection)
+        {
+            $routeCollection->add('route_options', new Route(
+                $path = '/route-options',
+                $defaults = array(
+                    '_controller' => 'Fixture\Options\Controller::mainAction'
+                ),
+                $requirements = array(),
+                $options = array(),
+                $host = '',
+                $scheme = array(),
+                $methods = array(),
+                $condition = ''
+            ));
+        });
+
+        ?>
+        namespace Fixture\Options {
+
+            use Sensio\Bundle\FrameworkExtraBundle\Configuration\Route;
+            use Sensio\Bundle\FrameworkExtraBundle\Configuration\Method;
+
+            class Controller {
+                /**
+                * @Route("/route-options", name="route_options", options={})
+                */
+                public function mainAction() {}
+            }
+        }
+        <?php
+
+        $this->registerAnnotation('Fixture\Options\Controller');
+
+        $this->load();
+    }
+
+    public function testSchemes()
+    {
+        ?>
+        route_schemes:
+            path: /route-schemes
+            defaults: { _controller: 'Fixture\Schemes\Controller::mainAction' }
+            schemes: ['https']
+        <?php
+        $this->registerYaml();
+
+        ?>
+        <routes xmlns="http://symfony.com/schema/routing"
+                xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                xsi:schemaLocation="http://symfony.com/schema/routing
+                http://symfony.com/schema/routing/routing-1.0.xsd">
+            <route id="route_schemes" path="/route-schemes" schemes="https">
+                <default key="_controller">Fixture\Schemes\Controller::mainAction</default>
+            </route>
+        </routes>
+        <?php
+        $this->registerXml();
+
+        $this->registerClosure(function(RouteCollection $routeCollection)
+        {
+            $routeCollection->add('route_schemes', new Route(
+                $path = '/route-schemes',
+                $defaults = array(
+                    '_controller' => 'Fixture\Schemes\Controller::mainAction'
+                ),
+                $requirements = array(),
+                $options = array(),
+                $host = '',
+                $scheme = array('https'),
+                $methods = array(),
+                $condition = ''
+            ));
+        });
+
+        ?>
+        namespace Fixture\Schemes {
+
+            use Sensio\Bundle\FrameworkExtraBundle\Configuration\Route;
+            use Sensio\Bundle\FrameworkExtraBundle\Configuration\Method;
+
+            class Controller {
+                /**
+                * @Route("/route-schemes", name="route_schemes", schemes="https")
+                */
+                public function mainAction() {}
+            }
+        }
+        <?php
+
+        $this->registerAnnotation('Fixture\Schemes\Controller');
+
+        $this->load();
+
+        $this->assertException(ResourceNotFoundException::class, function() {
+            $this->matchRequest(Request::create($path='http://www.mami.com/route-schemes'));
+        });
+
+        $this->assertTrue((bool) $this->matchRequest(
+            Request::create('https://www.mami.com/route-schemes')
+        ));
+
+        $this->assertEquals('https://localhost/route-schemes', $this->urlGenerator->generate('route_schemes'));
+    }
+
+    public function testPrefix()
+    {
+        ?>
+        main:
+            resource: routes1.yaml
+            prefix: /main
+        -----
+        home:
+            path: /home
+        <?php
+
+        $this->registerYaml();
+
+        ?>
+        <routes xmlns="http://symfony.com/schema/routing"
+                xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                xsi:schemaLocation="http://symfony.com/schema/routing
+                http://symfony.com/schema/routing/routing-1.0.xsd">
+            <import resource="routes1.xml" prefix="/main"/>
+        </routes>
+        -----
+        <routes xmlns="http://symfony.com/schema/routing"
+                xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                xsi:schemaLocation="http://symfony.com/schema/routing
+                http://symfony.com/schema/routing/routing-1.0.xsd">
+            <route id="home" path="/home">
+            </route>
+        </routes>
+        <?php
+        $this->registerXml();
+
+        $this->registerClosure(function(RouteCollection $routeCollection)
+        {
+            $mainCollection = new RouteCollection();
+            $mainCollection->add('home', new Route(
+                $path = '/home'
+            ));
+            $mainCollection->addPrefix('/main');
+
+            $routeCollection->addCollection($mainCollection);
+        });
+
+        $this->load();
+
+        $this->assertTrue((bool) $this->matchRequest(
+            Request::create('/main/home')
+        ));
+    }
+
 }
